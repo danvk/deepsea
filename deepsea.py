@@ -59,22 +59,15 @@ def seqs(xs, ys, batch_size, num_epochs=1):
 def split_train_test(xs, ys, test_count=1000):
     '''Split inputs & outputs into training & test.
 
-    This shuffles the xs & ys and splits them into the two sets.
     Returns (train_xs, train_ys), (test_xs, test_ys).
     '''
-    num_seqs = xs.shape[0]
-    indices = np.arange(num_seqs)
-    random.shuffle(indices)
-    split_idx = test_count
-    test_indices, train_indices = indices[:split_idx], indices[split_idx:]
-
-    return ((xs[train_indices,:,:], ys[train_indices,:]),
-            (xs[test_indices,:,:], ys[test_indices,:]))
+    return ((xs[test_count:,:,:], ys[test_count:,:]),
+            (xs[:test_count,:,:], ys[:test_count,:]))
 
 
 def weight_variable(shape):
     # initial = tf.truncated_normal(shape, stddev=0.1)
-    initial = tf.truncated_normal(shape, stddev=0.01)
+    initial = tf.truncated_normal(shape, stddev=0.04)
     return tf.Variable(initial)
 
 
@@ -182,14 +175,12 @@ if __name__ == '__main__':
     # Train using gradient descent
     # train_step = tf.train.MomentumOptimizer(learning_rate=1e-3, momentum=0.9).minimize(error)
     # XXX: The DeepSEA code uses a learning rate of 1.0, which immediately diverges.
-    train_step = tf.train.RMSPropOptimizer(learning_rate=1e-3, momentum=0.9, decay=8e-7).minimize(error)
+    train_step = tf.train.RMSPropOptimizer(learning_rate=1e-3, momentum=0.9, decay=8e-7).minimize(loss)
 
-    # Load the data and split it into train/test: 90% train, 10% test.
-    sequences, labels = load_data('train.mat')
+    # Load the data and split it into train/test: 99% train, 1% test.
+    sequences, labels = load_data('train100k.mat')
     print 'Input: %s --> %s' % (sequences.shape, labels.shape)
     (train_xs, train_ys), (test_xs, test_ys) = split_train_test(sequences, labels)
-
-    print_label_stats(labels)
 
     print 'Train: %s --> %s' % (train_xs.shape, train_ys.shape)
     print 'Test:  %s --> %s' % (test_xs.shape, test_ys.shape)
