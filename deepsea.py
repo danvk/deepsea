@@ -11,6 +11,7 @@ https://docs.google.com/document/d/1dp2Kn7258Tttd_-FEnM05HOUJzevq9B9GJn2lngcrfo/
 import h5py
 import tensorflow as tf
 import numpy as np
+import random
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -35,21 +36,45 @@ def seq_to_str(seq):
     return seq_str
 
 
-def seqs(f, batch_size, num_epochs=1):
-    '''Returns an iterator of (seq, label) pairs.'''
+def load_data(path):
+    '''Loads DeepSEA HDF5 data and reorders the axes.
+
+    Returns (sequences, labels), where the first axis is sample #.
+    '''
+    f = h5py.File(path, 'r')
     sequences = f['trainxdata']
     labels = f['traindata']
-    num_seqs = sequences.shape[2]
+    return np.rollaxis(sequences[:,:,:], 2), np.rollaxis(labels[:,:], 1)
 
-    return ((np.rollaxis(sequences[:,:,i:i+batch_size], 2),
-             np.rollaxis(labels[:,i:i+batch_size], 1))
+
+def seqs(xs, ys, batch_size, num_epochs=1):
+    '''Returns an iterator of (seq, label) pairs.'''
+    num_seqs = xs.shape[0]
+
+    return ((xs[i:i+batch_size,:,:], ys[i:i+batch_size,:])
             for epoch in xrange(0, num_epochs)
             for i in xrange(0, num_seqs, batch_size))
 
 
+def split_train_test(xs, ys, test_count=1000):
+    '''Split inputs & outputs into training & test.
+
+    This shuffles the xs & ys and splits them into the two sets.
+    Returns (train_xs, train_ys), (test_xs, test_ys).
+    '''
+    num_seqs = xs.shape[0]
+    indices = np.arange(num_seqs)
+    random.shuffle(indices)
+    split_idx = test_count
+    test_indices, train_indices = indices[:split_idx], indices[split_idx:]
+
+    return ((xs[train_indices,:,:], ys[train_indices,:]),
+            (xs[test_indices,:,:], ys[test_indices,:]))
+
+
 def weight_variable(shape):
     # initial = tf.truncated_normal(shape, stddev=0.1)
-    initial = tf.truncated_normal(shape, stddev=0.05)
+    initial = tf.truncated_normal(shape, stddev=0.01)
     return tf.Variable(initial)
 
 
@@ -85,8 +110,6 @@ def l1norm(Ws):
 
 
 if __name__ == '__main__':
-    f = h5py.File('train10k.mat', 'r')
-
     # Build the Graph
     x = tf.placeholder('float', shape=[None, 1000, 4])  # inputs: 1-hot sequences
     y_ = tf.placeholder('float', shape=[None, 919])  # labels
@@ -127,10 +150,10 @@ if __name__ == '__main__':
         W_fc1 = weight_variable([960 * 13, 925])
         b_fc1 = bias_variable([925])
         h_fc1 = tf.nn.relu(tf.matmul(h_pool3_flat, W_fc1) + b_fc1)
-        tf.histogram_summary('W_fc1', W_fc1)
-        tf.histogram_summary('b_fc1', b_fc1)
-        tf.histogram_summary('h_fc1', h_fc1)
-        tf.scalar_summary('norm_h_fc1', l1norm([h_fc1]))
+        tf.histogram_summary('fc1_W', W_fc1)
+        tf.histogram_summary('fc1_b', b_fc1)
+        tf.histogram_summary('fc1_h', h_fc1)
+        tf.scalar_summary('fc1_norm_h', l1norm([h_fc1]))
 
     # Sigmoid output layer
     with tf.name_scope('sigmoid') as scope:
@@ -138,10 +161,10 @@ if __name__ == '__main__':
         b_fc2 = bias_variable([919])
         h_fc2 = tf.matmul(h_fc1, W_fc2) + b_fc2
         y = tf.nn.sigmoid(h_fc2)
-        tf.histogram_summary('W_fc2', W_fc2)
-        tf.histogram_summary('b_fc2', b_fc2)
-        tf.histogram_summary('h_fc2', h_fc2)
-        tf.scalar_summary('norm_h_fc2', l1norm([h_fc2]))
+        tf.histogram_summary('fc2_W', W_fc2)
+        tf.histogram_summary('fc2_b', b_fc2)
+        tf.histogram_summary('fc2_h', h_fc2)
+        tf.scalar_summary('fc2_norm_h', l1norm([h_fc2]))
         tf.histogram_summary('y', y)
 
     # Error term: log-likelihood
@@ -157,21 +180,33 @@ if __name__ == '__main__':
     merged = tf.merge_all_summaries()
 
     # Train using gradient descent
-    # TODO: Use rmsprop
     # train_step = tf.train.MomentumOptimizer(learning_rate=1e-3, momentum=0.9).minimize(error)
+    # XXX: The DeepSEA code uses a learning rate of 1.0, which immediately diverges.
     train_step = tf.train.RMSPropOptimizer(learning_rate=1e-3, momentum=0.9, decay=8e-7).minimize(error)
+
+    # Load the data and split it into train/test: 90% train, 10% test.
+    sequences, labels = load_data('train.mat')
+    print 'Input: %s --> %s' % (sequences.shape, labels.shape)
+    (train_xs, train_ys), (test_xs, test_ys) = split_train_test(sequences, labels)
+
+    print_label_stats(labels)
+
+    print 'Train: %s --> %s' % (train_xs.shape, train_ys.shape)
+    print 'Test:  %s --> %s' % (test_xs.shape, test_ys.shape)
 
     with tf.Session() as sess:
         writer = tf.train.SummaryWriter("/tmp/deepsea_logs", sess.graph_def)
         sess.run(tf.initialize_all_variables())
         print 'Initialized!'
 
-        for i, (xs, labels) in enumerate(seqs(f, batch_size=16, num_epochs=10)):
-            feed_dict = {x: xs, y_: labels}
+        for i, (xs, labels) in enumerate(
+                seqs(train_xs, train_ys, batch_size=16, num_epochs=10)):
             if i % 10 == 0:
-                summary_str, nll = sess.run([merged, error], feed_dict=feed_dict)
+                print '%d...' % i
+            if i % 100 == 0:
+                summary_str, nll = sess.run([merged, error], feed_dict={x: test_xs, y_: test_ys})
                 writer.add_summary(summary_str, i)
                 print 'step %5d training error=%g' % (i, nll)
 
-            train_step.run(feed_dict=feed_dict)
+            train_step.run(feed_dict={x: xs, y_: labels})
 
