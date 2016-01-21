@@ -3,10 +3,10 @@ Reimplementation of DeepSEA using TensorFlow.
 
 To get everything set up:
 
-  1. [Install TensorFlow][tf]
+  1. [Install TensorFlow][tf] and numpy.
   1. Install other requirements, possibly in a virtualenv:
     `pip install -r requirements.txt`
-  1. Download Jeff's [processed version][data] of the data. You'll need to put `train10k.mat` in the repo's root directory.
+  1. Download Jeff's [processed version][data] of the data (47 MB). You'll need to put `train10k.mat` in the repo's root directory.
   
 To train a model, run:
 
